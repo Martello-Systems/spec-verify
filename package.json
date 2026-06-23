@@ -1,0 +1,36 @@
+{
+  "name": "spec-verify",
+  "version": "0.1.0",
+  "description": "Did the agent actually build the spec? A CI-friendly acceptance gate that emits a per-criterion PASS/FAIL/UNVERIFIABLE verdict on whether an AI-built codebase met its acceptance criteria.",
+  "type": "module",
+  "bin": {
+    "spec-verify": "bin/spec-verify.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "start": "node bin/spec-verify.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "spec",
+    "acceptance",
+    "ci",
+    "llm",
+    "verification",
+    "ai",
+    "anthropic",
+    "claude",
+    "acceptance-criteria"
+  ],
+  "author": "Martello Systems",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "commander": "^12.1.0"
+  }
+}
