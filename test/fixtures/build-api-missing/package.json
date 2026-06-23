@@ -1,0 +1,9 @@
+{
+  "name": "orders-api",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "start": "node api.js"
+  }
+}

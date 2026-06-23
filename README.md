@@ -155,13 +155,41 @@ Swap the judge for a mock in tests with `createMockJudge(fn)`.
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
+## Limitations
+
+- **Source-text heuristics, not an AST.** `export-exists` / `route-exists` match
+  common ESM/CJS and Express/Fastify/Next forms via regex, not a full parser. An
+  exotic re-export or a route built from a computed string can be missed. Prefer
+  a `grep` directive for anything unusual.
+- **The LLM judge is a fallback, not the moat.** Deterministic directives decide
+  the verdict whenever they can; the judge only adjudicates criteria with no
+  directive. Lean on directives for anything you want CI to enforce hard.
+- **`npm-script` runs the script** in the target dir — only enable it on builds
+  you trust, or pass `--no-run-scripts`.
+- **Binary files are skipped** (NUL-byte heuristic), so grep/export/route checks
+  apply to text sources only.
+
+## Demo
+
+> _Demo recording placeholder — a short asciinema/GIF of `spec-verify check`
+> catching a silently-skipped criterion in CI will live here._
+
 ## Development
 
 ```bash
 npm install
-npm test
+npm test     # node:test — deterministic detection + a fixtured LLM-judge seam
+npm run lint # ESLint (flat config, plain ESM)
 ```
+
+The LLM judge has a clean seam: `buildJudgePrompt` (prompt assembly) and
+`parseJudgeResponse` (response parsing) are pure and unit-tested against
+recorded Anthropic responses — well-formed, malformed, partial, refusal, and
+empty — with **no API key and no network**. A single live smoke test runs only
+when `ANTHROPIC_API_KEY` is set, and skips cleanly otherwise. Detection is
+proven against two spec/build fixture pairs: a good build where every criterion
+passes, and a build that silently skips a criterion, which must be flagged.
 
 ## License
 
-MIT © 2026 Martello Systems
+MIT © 2026 Martello Systems. See [LICENSE](./LICENSE).

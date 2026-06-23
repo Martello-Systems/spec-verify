@@ -71,43 +71,93 @@ export function createAnthropicJudge(opts = {}) {
   return {
     model,
     async judge(input) {
-      const client = await getClient();
       const { system, user } = buildJudgePrompt(input);
 
-      const response = await client.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system,
-        messages: [{ role: 'user', content: user }],
-        output_config: {
-          format: {
-            type: 'json_schema',
-            schema: {
-              type: 'object',
-              properties: {
-                verdict: { type: 'string', enum: VERDICTS },
-                reason: { type: 'string' },
-              },
-              required: ['verdict', 'reason'],
-              additionalProperties: false,
-            },
-          },
-        },
-      });
-
-      const text = textOf(response);
-      let parsed;
+      let client;
       try {
-        parsed = JSON.parse(text);
-      } catch {
+        client = await getClient();
+      } catch (e) {
+        // Surface a clear, actionable message rather than a raw SDK stack.
         return {
           verdict: 'UNVERIFIABLE',
-          reason: `judge returned non-JSON output: ${text.slice(0, 200)}`,
+          reason: `could not initialize the Anthropic client (${cleanErr(e)}); ` +
+            'is ANTHROPIC_API_KEY set?',
         };
       }
-      return normalizeVerdict(parsed);
+
+      let response;
+      try {
+        response = await client.messages.create({
+          model,
+          max_tokens: maxTokens,
+          system,
+          messages: [{ role: 'user', content: user }],
+          output_config: {
+            format: {
+              type: 'json_schema',
+              schema: {
+                type: 'object',
+                properties: {
+                  verdict: { type: 'string', enum: VERDICTS },
+                  reason: { type: 'string' },
+                },
+                required: ['verdict', 'reason'],
+                additionalProperties: false,
+              },
+            },
+          },
+        });
+      } catch (e) {
+        // Network error, auth error, rate limit, etc. Never crash the gate —
+        // degrade to UNVERIFIABLE with a readable reason.
+        return {
+          verdict: 'UNVERIFIABLE',
+          reason: `LLM judge request failed: ${cleanErr(e)}`,
+        };
+      }
+
+      return parseJudgeResponse(response);
     },
   };
+}
+
+/**
+ * Turn a raw Anthropic Messages response into a normalized {verdict, reason}.
+ * Handles, without ever throwing:
+ *   - well-formed verdict JSON
+ *   - a safety refusal (stop_reason === 'refusal')
+ *   - an empty / missing content array
+ *   - malformed or partial JSON (extracts a fenced/embedded JSON object if any)
+ *
+ * Exported so the parsing seam can be tested with recorded responses and no key.
+ */
+export function parseJudgeResponse(response) {
+  if (response && response.stop_reason === 'refusal') {
+    return {
+      verdict: 'UNVERIFIABLE',
+      reason: 'LLM judge declined to answer (safety refusal)',
+    };
+  }
+
+  const text = textOf(response);
+  if (!text) {
+    return { verdict: 'UNVERIFIABLE', reason: 'LLM judge returned an empty response' };
+  }
+
+  const parsed = parseLenientJson(text);
+  if (parsed === undefined) {
+    return {
+      verdict: 'UNVERIFIABLE',
+      reason: `LLM judge returned non-JSON output: ${snippet(text)}`,
+    };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {
+      verdict: 'UNVERIFIABLE',
+      reason: `LLM judge returned unexpected JSON: ${snippet(text)}`,
+    };
+  }
+  return normalizeVerdict(parsed);
 }
 
 /**
@@ -146,6 +196,51 @@ export function buildJudgePrompt({ criterion, evidence = [], codeContext = '' })
 }
 
 /* ---------------------------------------------------------------- helpers */
+
+/**
+ * Parse JSON leniently. Returns the parsed value, or `undefined` if no JSON
+ * object could be recovered. Handles three real-world model behaviors:
+ *   1. clean JSON
+ *   2. JSON wrapped in a ```json fenced block or surrounded by prose
+ *   3. partial / malformed JSON (returns undefined — caller degrades gracefully)
+ */
+function parseLenientJson(text) {
+  const trimmed = String(text).trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    /* fall through to recovery */
+  }
+  // Strip a ```json ... ``` fence if present.
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) {
+    try {
+      return JSON.parse(fence[1].trim());
+    } catch {
+      /* fall through */
+    }
+  }
+  // Last resort: grab the first balanced-looking {...} object and try it.
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1));
+    } catch {
+      /* fall through */
+    }
+  }
+  return undefined;
+}
+
+function cleanErr(e) {
+  const msg = (e && (e.message || e.toString())) || 'unknown error';
+  return String(msg).split('\n')[0].slice(0, 200);
+}
+
+function snippet(text) {
+  return String(text).replace(/\s+/g, ' ').trim().slice(0, 200);
+}
 
 function normalizeVerdict(out) {
   let v = String(out && out.verdict ? out.verdict : 'UNVERIFIABLE').toUpperCase();

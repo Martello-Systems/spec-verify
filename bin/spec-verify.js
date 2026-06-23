@@ -17,6 +17,7 @@ import {
   verify,
   createMockJudge,
   createAnthropicJudge,
+  SpecVerifyInputError,
   DEFAULT_MODEL,
   SMART_MODEL,
   formatTable,
@@ -63,6 +64,10 @@ program
         ctx: { runScripts: opts.runScripts !== false },
       });
     } catch (e) {
+      // Input problems get a clean one-line message; only genuine bugs print a stack.
+      if (e instanceof SpecVerifyInputError) {
+        fail(e.message);
+      }
       fail(`verification error: ${e.stack || e.message}`);
     }
 

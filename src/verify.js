@@ -17,8 +17,47 @@ import {
   gatherFromDirective,
   checkGrep,
 } from './evidence.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+
+/**
+ * Error raised when spec-verify is called with invalid inputs (missing/empty
+ * spec, missing source directory, garbage spec with no criteria). Carries a
+ * stable `code` so callers / the CLI can produce a clear message instead of a
+ * raw stack trace.
+ */
+export class SpecVerifyInputError extends Error {
+  constructor(message, code = 'INPUT_ERROR') {
+    super(message);
+    this.name = 'SpecVerifyInputError';
+    this.code = code;
+  }
+}
+
+/**
+ * Validate that `srcDir` exists and is a directory. Throws a SpecVerifyInputError
+ * with an actionable message otherwise. Returns nothing.
+ */
+export async function assertSrcDir(srcDir) {
+  if (!srcDir || typeof srcDir !== 'string') {
+    throw new SpecVerifyInputError('no source directory provided', 'SRC_MISSING');
+  }
+  let st;
+  try {
+    st = await stat(srcDir);
+  } catch {
+    throw new SpecVerifyInputError(
+      `source path "${srcDir}" does not exist`,
+      'SRC_NOT_FOUND',
+    );
+  }
+  if (!st.isDirectory()) {
+    throw new SpecVerifyInputError(
+      `source path "${srcDir}" is not a directory`,
+      'SRC_NOT_DIR',
+    );
+  }
+}
 
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'be', 'to', 'of', 'in',
@@ -39,7 +78,24 @@ const STOPWORDS = new Set([
  * @returns {Promise<{criteria:object[], results:object[], summary:object}>}
  */
 export async function verify({ spec, srcDir, judge, parseOpts = {}, ctx = {} }) {
+  if (spec == null || typeof spec !== 'string' || spec.trim() === '') {
+    throw new SpecVerifyInputError('spec is empty or not a string', 'SPEC_EMPTY');
+  }
+  // Skip the filesystem check when the caller supplies an explicit file list
+  // (used by tests of the pure orchestration logic).
+  if (!ctx.files) {
+    await assertSrcDir(srcDir);
+  }
+
   const criteria = extractCriteria(spec, parseOpts);
+  if (criteria.length === 0) {
+    throw new SpecVerifyInputError(
+      'no acceptance criteria found in the spec — expected a checklist ' +
+        '(`- [ ] ...`), a must/shall bullet, or items under an "Acceptance ' +
+        'Criteria" heading',
+      'NO_CRITERIA',
+    );
+  }
   const files = ctx.files || (await listFiles(srcDir));
   const sharedCtx = { ...ctx, files };
 

@@ -29,9 +29,17 @@ export {
   createMockJudge,
   createAnthropicJudge,
   buildJudgePrompt,
+  parseJudgeResponse,
   VERDICTS,
   DEFAULT_MODEL,
   SMART_MODEL,
 } from './judge.js';
-export { verify, verifyOne, summarize, keywordsFor } from './verify.js';
+export {
+  verify,
+  verifyOne,
+  summarize,
+  keywordsFor,
+  assertSrcDir,
+  SpecVerifyInputError,
+} from './verify.js';
 export { formatTable, formatMarkdown, formatJson } from './report.js';
