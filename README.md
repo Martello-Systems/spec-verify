@@ -1,5 +1,7 @@
 # spec-verify
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Built by Martello Systems](https://img.shields.io/badge/built%20by-Martello%20Systems-0b0b14)](https://martellosystems.com)
+
 **Did the agent actually build the spec?**
 
 `spec-verify` takes the original spec/requirements document an AI agent was given
@@ -193,3 +195,11 @@ passes, and a build that silently skips a criterion, which must be flagged.
 ## License
 
 MIT © 2026 Martello Systems. See [LICENSE](./LICENSE).
+
+---
+
+## Built by Martello Systems
+
+`spec-verify` is part of the open-source toolkit from **[Martello Systems](https://martellosystems.com)** — we ship AI-built software, spec to delivery in days. If this saved you time, come [see what we do](https://martellosystems.com).
+
+Licensed under the [Apache License 2.0](LICENSE).
