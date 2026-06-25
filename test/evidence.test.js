@@ -20,9 +20,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const COMPLETE = path.join(here, 'fixtures', 'build-complete');
 const INCOMPLETE = path.join(here, 'fixtures', 'build-incomplete');
 const API_GOOD = path.join(here, 'fixtures', 'build-api-good');
-const ROUTE_EXPRESS = path.join(here, 'fixtures', 'route-cases', 'express-route');
-const ROUTE_FASTIFY = path.join(here, 'fixtures', 'route-cases', 'fastify-route');
-const ROUTE_STRING_ONLY = path.join(here, 'fixtures', 'route-cases', 'string-only');
+const routeCase = (name) => path.join(here, 'fixtures', 'route-cases', name);
+const ROUTE_EXPRESS = routeCase('express-route');
+const ROUTE_FASTIFY = routeCase('fastify-route');
+const ROUTE_STRING_ONLY = routeCase('string-only');
+const ROUTE_COMMENT_LINE = routeCase('comment-line');
+const ROUTE_COMMENT_BLOCK = routeCase('comment-block');
+const ROUTE_TRAILING_COMMENT = routeCase('trailing-comment');
+const ROUTE_CONFIG_NAV = routeCase('config-nav');
+const ROUTE_CONFIG_TEST = routeCase('config-test');
+const ROUTE_FASTIFY_CALL = routeCase('fastify-call');
+const ROUTE_CHAIN = routeCase('route-chain');
 const GREP_CASES = path.join(here, 'fixtures', 'grep-cases');
 
 /* ----- glob ----- */
@@ -129,6 +137,20 @@ test('checkGrep: existing "at least twice" fixture passes for the right reason',
   assert.ok(e.details.occurrences >= 2, `expected >= 2 occurrences, got ${e.details.occurrences}`);
 });
 
+test('checkGrep: empty-matchable patterns do not inflate the occurrence count', async () => {
+  // zerowidth.txt is "aaaaa\n", which contains no `b`. With the forced global
+  // flag, `b*` matches the empty string at every position; counting those
+  // zero-width matches would report ~7 occurrences and make any `min` trivially
+  // pass. The guard counts only non-empty matches, so a pattern with no real
+  // match is 0 (before the guard this was the file length + 1).
+  const none = await checkGrep(GREP_CASES, { pattern: 'b*', glob: 'zerowidth.txt', min: 1 });
+  assert.equal(none.details.occurrences, 0, 'zero-width matches must not be counted');
+  assert.equal(none.verdict, 'FAIL', 'no real occurrences -> FAIL even at min=1');
+  // A pattern that genuinely matches a non-empty run is still counted (once here).
+  const real = await checkGrep(GREP_CASES, { pattern: 'a+', glob: 'zerowidth.txt' });
+  assert.equal(real.details.occurrences, 1);
+});
+
 /* ----- export-exists ----- */
 
 test('checkExportExists: finds an exported function', async () => {
@@ -185,6 +207,59 @@ test('checkRouteExists: raw http req.url comparison PASSes (complete build)', as
   // build-complete declares its route as `req.url === '/health'`, not a router
   // method call. That is still a genuine routing construct and must PASS.
   const e = await checkRouteExists(COMPLETE, { path: '/health' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+/* --- route-exists must ignore routes that live only inside comments --- */
+
+test('checkRouteExists: a route only in a // line comment is FAIL', async () => {
+  // OLD behavior: raw-text regex matched `app.get('/widgets'` inside the
+  // comment -> false PASS. NEW: comments are stripped first -> FAIL.
+  const e = await checkRouteExists(ROUTE_COMMENT_LINE, { path: '/widgets' });
+  assert.equal(e.verdict, 'FAIL', 'a commented-out route is not a route');
+});
+
+test('checkRouteExists: a route only in a block comment is FAIL', async () => {
+  const e = await checkRouteExists(ROUTE_COMMENT_BLOCK, { path: '/widgets', method: 'post' });
+  assert.equal(e.verdict, 'FAIL', 'a route inside a block comment is not a route');
+});
+
+test('checkRouteExists: real code with a trailing comment still PASSes', async () => {
+  // The real `app.get('/widgets', ...)` survives comment stripping; only the
+  // trailing `// note` is removed.
+  const e = await checkRouteExists(ROUTE_TRAILING_COMMENT, { path: '/widgets' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+/* --- config/test objects need a method: key to count as a route --- */
+
+test('checkRouteExists: a nav object (path key, no method) is FAIL', async () => {
+  // OLD behavior: the lone `path: '/widgets'` key matched -> false PASS.
+  const e = await checkRouteExists(ROUTE_CONFIG_NAV, { path: '/widgets' });
+  assert.equal(e.verdict, 'FAIL', 'a nav menu entry is not a route');
+});
+
+test('checkRouteExists: a test constant (route key, no method) is FAIL', async () => {
+  const e = await checkRouteExists(ROUTE_CONFIG_TEST, { path: '/widgets' });
+  assert.equal(e.verdict, 'FAIL', 'a test expectation constant is not a route');
+});
+
+test('checkRouteExists: a config object with method + url PASSes', async () => {
+  const e = await checkRouteExists(ROUTE_FASTIFY, { path: '/widgets' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+test('checkRouteExists: fastify.route({ method, path }) PASSes', async () => {
+  const e = await checkRouteExists(ROUTE_FASTIFY_CALL, { path: '/widgets' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+/* --- Express .route('/x') chain (path on .route, not a method call) --- */
+
+test('checkRouteExists: app.route("/x").get(...) chain PASSes', async () => {
+  // OLD behavior: the path was on `.route(`, not in the method alternation,
+  // so the tightened matcher wrongly FAILed. A dedicated .route() pattern fixes it.
+  const e = await checkRouteExists(ROUTE_CHAIN, { path: '/widgets' });
   assert.equal(e.verdict, 'PASS');
 });
 

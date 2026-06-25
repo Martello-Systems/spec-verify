@@ -169,11 +169,16 @@ export async function checkGrep(srcDir, args, ctx = {}) {
     }
     // Skip obvious binaries.
     if (content.includes('\0')) continue;
-    // Count occurrences in this file. With the global flag, String#match
-    // returns an array of all matches (or null); its length is the count.
-    const matches = content.match(re);
-    if (matches && matches.length) {
-      occurrences += matches.length;
+    // Count occurrences in this file. Iterate matchAll (regex is global) and
+    // count only non-empty matches: a pattern that can match the empty string
+    // (e.g. `x*`) yields a zero-width match at every position, which would
+    // otherwise inflate the count and make any `min` trivially satisfiable.
+    let fileCount = 0;
+    for (const m of content.matchAll(re)) {
+      if (m[0].length > 0) fileCount++;
+    }
+    if (fileCount > 0) {
+      occurrences += fileCount;
       hits.push(rel);
     }
   }
@@ -290,9 +295,17 @@ export async function checkExportExists(srcDir, args, ctx = {}) {
  *
  * Matches Express/Fastify/Koa-style declarations and config-driven route
  * objects. Crucially it requires the path to co-occur with an actual *routing
- * construct* — a method call, a route-config key, or a request-URL comparison.
- * A path that merely appears as a quoted string in a comment, a log line, or a
- * test constant is NOT a route and must not produce a (false) PASS.
+ * construct* — a method call, a `.route()` chain, a route-config object that
+ * also carries a `method:` key, or a request-URL comparison. A path that merely
+ * appears as a quoted string in a comment, a log line, a nav menu, or a test
+ * constant is NOT a route and must not produce a (false) PASS. Comments (`//`
+ * and block) are stripped before matching, so a route that only exists inside a
+ * comment does not count.
+ *
+ * NOT covered: Next.js (and similar) file-convention routes, where the path is
+ * encoded in the file path (e.g. `app/widgets/route.ts`) and never appears as a
+ * literal in code. Assert those with `file-exists` instead, e.g.
+ * `<!-- check: file-exists glob="app/**\/route.{js,ts}" -->`.
  */
 export async function checkRouteExists(srcDir, args, ctx = {}) {
   const routePath = args.path;
@@ -305,19 +318,27 @@ export async function checkRouteExists(srcDir, args, ctx = {}) {
     : '(?:get|post|put|patch|delete|options|head|all|use)';
   // The path rendered as a quoted string literal (single, double, or template).
   const q = `['"\`]${p}['"\`]`;
+  // A route-config object key holding the path. `[^{}]` keeps the "near a
+  // method: key" search inside one object literal (a brace ends the span).
+  const pathKey = `(?:url|path|route|pathname)\\s*:\\s*${q}`;
   const patterns = [
     // 1. Router method call: app.get('/path', ...) / router.post("/path", ...)
     `\\.\\s*${method}\\s*\\(\\s*${q}`,
-    // 2. Route-config object key: { method:'GET', url:'/path' } / { path:'/path' }
-    //    / { route:'/path' } (Fastify object form, config-driven routers).
-    `(?:url|path|route|pathname)\\s*:\\s*${q}`,
-    // 3. Raw http(s) request dispatch: req.url === '/path' (or the reverse).
+    // 2. Express route chain: app.route('/path').get(...) (path on .route()).
+    `\\.\\s*route\\s*\\(\\s*${q}`,
+    // 3. Route-config object: a `method:` key co-occurring with the path key in
+    //    the same object literal, in either order. Real Fastify/config routes
+    //    always carry a method; nav menus and test constants do not.
+    `method\\s*:[^{}]*?${pathKey}`,
+    `${pathKey}[^{}]*?method\\s*:`,
+    // 4. Raw http(s) request dispatch: req.url === '/path' (or the reverse).
     `(?:req(?:uest)?\\.url|\\.pathname)\\s*===?\\s*${q}`,
     `${q}\\s*===?\\s*(?:req(?:uest)?\\.url|\\.pathname)`,
   ];
   const combined = patterns.join('|');
   const globs = expandBraces(args.glob || '**/*.{js,jsx,ts,tsx,mjs,cjs}');
-  const sub = await orGrep(srcDir, combined, globs, ctx);
+  // Strip comments first: a route that only exists in a comment is not a route.
+  const sub = await orGrep(srcDir, combined, globs, ctx, { stripComments: true });
   return ev(
     'route-exists',
     true,
@@ -385,8 +406,15 @@ export function expandBraces(glob) {
   return body.split(',').map((opt) => pre + opt.trim() + post);
 }
 
-/** Run a regex across the union of several globs; report which files matched. */
-async function orGrep(srcDir, pattern, globs, ctx) {
+/**
+ * Run a regex across the union of several globs; report which files matched.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.stripComments]  blank out `//` line and block comments
+ *        (string-literal-aware) before matching. Opt-in so the default text
+ *        behavior of other gatherers (e.g. export-exists) is unchanged.
+ */
+async function orGrep(srcDir, pattern, globs, ctx, { stripComments: strip = false } = {}) {
   const files = ctx.files || (await listFiles(srcDir));
   let re;
   try {
@@ -405,10 +433,59 @@ async function orGrep(srcDir, pattern, globs, ctx) {
       continue;
     }
     if (content.includes('\0')) continue;
-    if (re.test(content)) hits.push(rel);
+    const haystack = strip ? stripComments(content) : content;
+    if (re.test(haystack)) hits.push(rel);
   }
   hits.sort();
   return { ok: hits.length > 0, hits };
+}
+
+/**
+ * Remove `//` line comments and block comments from JS/TS source, leaving
+ * everything else (including newlines) intact so line structure is preserved.
+ * String- and template-literal-aware: a `//` or block-comment marker inside a
+ * quoted string (e.g. the `://` in `'http://x'`) is NOT treated as a comment.
+ * This is a deliberately small scanner, not a full parser; it is good enough to
+ * stop route-exists from matching a route that only lives inside a comment.
+ */
+function stripComments(src) {
+  let out = '';
+  const n = src.length;
+  // states: code | line | block | sq (') | dq (") | tpl (`)
+  let state = 'code';
+  for (let i = 0; i < n; i++) {
+    const c = src[i];
+    const c2 = src[i + 1];
+    if (state === 'code') {
+      if (c === '/' && c2 === '/') { state = 'line'; i++; continue; }
+      if (c === '/' && c2 === '*') { state = 'block'; i++; continue; }
+      if (c === "'") { state = 'sq'; out += c; continue; }
+      if (c === '"') { state = 'dq'; out += c; continue; }
+      if (c === '`') { state = 'tpl'; out += c; continue; }
+      out += c;
+      continue;
+    }
+    if (state === 'line') {
+      if (c === '\n') { state = 'code'; out += c; }
+      continue;
+    }
+    if (state === 'block') {
+      if (c === '*' && c2 === '/') { state = 'code'; i++; continue; }
+      if (c === '\n') out += c; // keep newlines for line-anchored matching
+      continue;
+    }
+    // string / template states: copy verbatim, honoring backslash escapes.
+    if (c === '\\') {
+      out += c;
+      if (i + 1 < n) out += src[i + 1];
+      i++;
+      continue;
+    }
+    const quote = state === 'sq' ? "'" : state === 'dq' ? '"' : '`';
+    if (c === quote) { state = 'code'; out += c; continue; }
+    out += c;
+  }
+  return out;
 }
 
 async function readPackageJson(srcDir, ctx) {

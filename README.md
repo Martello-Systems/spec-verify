@@ -122,6 +122,18 @@ evidence and are handed to the LLM judge.
 
 Aliases: `file`/`contains`/`script`/`test`/`export`/`route` map to the above.
 
+`route-exists` matches the path where it appears as a routing construct in code:
+a router method call (`app.get('/x')`), a `.route('/x')` chain, a config object
+that also carries a `method:` key, or a `req.url === '/x'` comparison. A path
+that only shows up in a comment, a nav menu, or a test constant does **not**
+count. For **Next.js (App/Pages) file-convention routes** the path is encoded in
+the file path and never appears as a literal in code, so assert those with
+`file-exists`, not `route-exists`:
+
+```markdown
+- [ ] A /widgets route handler exists <!-- check: file-exists glob="app/**/route.{js,ts}" -->
+```
+
 ## Example output
 
 ```
@@ -181,9 +193,12 @@ if any criterion could not be verified.
 ## Limitations
 
 - **Source-text heuristics, not an AST.** `export-exists` / `route-exists` match
-  common ESM/CJS and Express/Fastify/Next forms via regex, not a full parser. An
-  exotic re-export or a route built from a computed string can be missed. Prefer
-  a `grep` directive for anything unusual.
+  common ESM/CJS and Express/Fastify forms via regex (comment-stripped for
+  routes), not a full parser. An exotic re-export or a route built from a
+  computed string can be missed. Prefer a `grep` directive for anything unusual.
+- **Next.js file-convention routes are not matched by `route-exists`** (the path
+  is in the file name, not in code). Use `file-exists` with a glob like
+  `app/**/route.{js,ts}` instead.
 - **The LLM judge is a fallback, not the moat.** Deterministic directives decide
   the verdict whenever they can; the judge only adjudicates criteria with no
   directive. Lean on directives for anything you want CI to enforce hard.
