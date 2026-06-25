@@ -194,7 +194,7 @@ passes, and a build that silently skips a criterion, which must be flagged.
 
 ## License
 
-MIT © 2026 Martello Systems. See [LICENSE](./LICENSE).
+Apache-2.0 © 2026 Martello Systems. See [LICENSE](./LICENSE).
 
 ---
 
