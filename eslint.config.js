@@ -22,6 +22,9 @@ export default [
         clearTimeout: 'readonly',
         URL: 'readonly',
         Buffer: 'readonly',
+        // Web-standard globals available in Node 18+ (matches `engines`).
+        Response: 'readonly',
+        globalThis: 'readonly',
       },
     },
     rules: {

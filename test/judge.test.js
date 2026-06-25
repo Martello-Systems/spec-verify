@@ -305,6 +305,69 @@ test('createAnthropicJudge: a smart model id is honored', async () => {
   assert.equal(seen.model, 'claude-sonnet-4-6');
 });
 
+/* ---- real SDK wire path over a stubbed transport (no key, no network) ----
+ *
+ * @anthropic-ai/sdk@^0.40 dispatches over `node-fetch`, NOT the global fetch,
+ * so undici's MockAgent (which only intercepts the global undici dispatcher)
+ * does not reliably intercept it on this SDK version. Instead we drive the REAL
+ * SDK end to end and stub only the transport via the SDK's documented `fetch`
+ * option: no client is injected, so the genuine Anthropic client serializes the
+ * request (forced `record_verdict` tool + tool_choice) and decodes the response;
+ * our judge then reads the verdict straight out of the tool_use block. The wire
+ * shape below is a recorded Anthropic Messages response, locked as a fixture.
+ */
+test('createAnthropicJudge: real SDK wire path reads the record_verdict tool_use block', async () => {
+  const savedKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-dummy-key-for-tests';
+  let seenUrl;
+  let seenBody;
+  const stubFetch = async (url, init) => {
+    seenUrl = String(url);
+    seenBody = JSON.parse(init.body);
+    // Recorded Anthropic Messages response: a forced record_verdict tool call.
+    const body = {
+      id: 'msg_recorded',
+      type: 'message',
+      role: 'assistant',
+      model: DEFAULT_MODEL,
+      stop_reason: 'tool_use',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_recorded',
+          name: 'record_verdict',
+          input: { verdict: 'PASS', reason: 'wire path ok' },
+        },
+      ],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    };
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  try {
+    // No injected client: the genuine SDK client is built (dummy key) and used.
+    const j = createAnthropicJudge({ fetch: stubFetch });
+    const out = await j.judge({
+      criterion: { text: 'Exposes /health' },
+      evidence: [],
+      codeContext: '',
+    });
+    // The verdict was decoded from the real SDK response, not a hand-rolled object.
+    assert.equal(out.verdict, 'PASS');
+    assert.equal(out.reason, 'wire path ok');
+    // ...and the SDK actually serialized our forced-tool-use request onto the wire.
+    assert.match(seenUrl, /\/v1\/messages$/);
+    assert.equal(seenBody.model, DEFAULT_MODEL);
+    assert.equal(seenBody.tools[0].name, 'record_verdict');
+    assert.deepEqual(seenBody.tool_choice, { type: 'tool', name: 'record_verdict' });
+  } finally {
+    if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = savedKey;
+  }
+});
+
 // Live smoke test: only runs when ANTHROPIC_API_KEY is present. Skipped
 // gracefully otherwise so completion never depends on a live key.
 test('live judge smoke test (requires ANTHROPIC_API_KEY)', { skip: !process.env.ANTHROPIC_API_KEY }, async () => {

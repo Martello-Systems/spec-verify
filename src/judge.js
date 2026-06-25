@@ -47,6 +47,10 @@ export function createMockJudge(fn) {
  * @param {string} [opts.model]        - model id (default claude-haiku-4-5-20251001)
  * @param {string} [opts.apiKey]       - override; defaults to ANTHROPIC_API_KEY env
  * @param {object} [opts.client]       - inject a pre-built Anthropic client (for tests)
+ * @param {Function} [opts.fetch]      - inject a fetch implementation (passed straight
+ *        to the SDK). Lets tests drive the REAL SDK request/response path over a
+ *        stubbed transport, with no network and no real key.
+ * @param {string} [opts.baseURL]      - override the API base URL (passed to the SDK)
  * @param {number} [opts.maxTokens]
  * @returns {{judge: Function, model: string}}
  */
@@ -61,8 +65,15 @@ export function createAnthropicJudge(opts = {}) {
       clientPromise = (async () => {
         const mod = await import('@anthropic-ai/sdk');
         const Anthropic = mod.default || mod.Anthropic;
-        // The SDK reads ANTHROPIC_API_KEY from the environment by default.
-        return new Anthropic(opts.apiKey ? { apiKey: opts.apiKey } : {});
+        // The SDK reads ANTHROPIC_API_KEY from the environment by default; only
+        // forward options that were explicitly provided so default behavior is
+        // unchanged. `fetch`/`baseURL` are the supported transport seams the SDK
+        // exposes for testing against a stubbed wire.
+        const clientOpts = {};
+        if (opts.apiKey) clientOpts.apiKey = opts.apiKey;
+        if (opts.baseURL) clientOpts.baseURL = opts.baseURL;
+        if (opts.fetch) clientOpts.fetch = opts.fetch;
+        return new Anthropic(clientOpts);
       })();
     }
     return clientPromise;
