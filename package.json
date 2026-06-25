@@ -1,5 +1,5 @@
 {
-  "name": "spec-verify",
+  "name": "@martello-systems/spec-verify",
   "version": "0.1.0",
   "description": "Did the agent actually build the spec? A CI-friendly acceptance gate that emits a per-criterion PASS/FAIL/UNVERIFIABLE verdict on whether an AI-built codebase met its acceptance criteria.",
   "type": "module",
@@ -8,6 +8,9 @@
   },
   "exports": {
     ".": "./src/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "bin/",
