@@ -7,7 +7,7 @@
  *   spec-verify check --spec SPEC.md --src ./build --report report.md
  *
  * Exit code 0 if all criteria pass (or are only unverifiable), 1 if any fail,
- * 2 on a usage/IO error.
+ * 2 on a usage/IO error. With --strict, UNVERIFIABLE criteria also exit 1.
  */
 
 import { Command } from 'commander';
@@ -43,6 +43,7 @@ program
   .option('--smart', `use the smarter judge model (${SMART_MODEL})`, false)
   .option('--no-run-scripts', 'do not execute npm scripts referenced by directives')
   .option('--no-judge', 'skip the LLM judge entirely; undecided criteria become UNVERIFIABLE')
+  .option('--strict', 'treat UNVERIFIABLE criteria as failures (exit 1); recommended for CI', false)
   .option('--require-modal', 'only treat bullets containing must/shall/should as criteria')
   .action(async (opts) => {
     let specText;
@@ -62,6 +63,7 @@ program
         judge,
         parseOpts: { requireModal: !!opts.requireModal },
         ctx: { runScripts: opts.runScripts !== false },
+        strict: !!opts.strict,
       });
     } catch (e) {
       // Input problems get a clean one-line message; only genuine bugs print a stack.

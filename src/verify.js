@@ -75,9 +75,10 @@ const STOPWORDS = new Set([
  * @param {{judge:Function}} params.judge   - LLM judge (mock or real)
  * @param {object} [params.parseOpts]       - options forwarded to the parser
  * @param {object} [params.ctx]             - evidence ctx overrides (runScripts, files...)
+ * @param {boolean} [params.strict]         - count UNVERIFIABLE verdicts as failures
  * @returns {Promise<{criteria:object[], results:object[], summary:object}>}
  */
-export async function verify({ spec, srcDir, judge, parseOpts = {}, ctx = {} }) {
+export async function verify({ spec, srcDir, judge, parseOpts = {}, ctx = {}, strict = false }) {
   if (spec == null || typeof spec !== 'string' || spec.trim() === '') {
     throw new SpecVerifyInputError('spec is empty or not a string', 'SPEC_EMPTY');
   }
@@ -104,7 +105,7 @@ export async function verify({ spec, srcDir, judge, parseOpts = {}, ctx = {} }) 
     results.push(await verifyOne({ criterion, srcDir, judge, ctx: sharedCtx }));
   }
 
-  return { criteria, results, summary: summarize(results) };
+  return { criteria, results, summary: summarize(results, { strict }) };
 }
 
 /** Verify a single criterion. Exported for granular testing. */
@@ -151,17 +152,27 @@ export async function verifyOne({ criterion, srcDir, judge, ctx = {} }) {
   return makeResult(criterion, decision.verdict, decision.reason, evidence, 'judge');
 }
 
-/** Reduce per-criterion results to a summary + exit code. */
-export function summarize(results) {
+/**
+ * Reduce per-criterion results to a summary + exit code.
+ *
+ * @param {object[]} results
+ * @param {object}  [opts]
+ * @param {boolean} [opts.strict]  when true, UNVERIFIABLE verdicts also fail the
+ *        gate (exit 1). This is the recommended CI setting: it prevents a build
+ *        whose criteria could not be checked (e.g. no API key for the judge)
+ *        from passing silently. Default false (UNVERIFIABLE is non-fatal).
+ */
+export function summarize(results, { strict = false } = {}) {
   const counts = { PASS: 0, FAIL: 0, UNVERIFIABLE: 0 };
   for (const r of results) counts[r.verdict] = (counts[r.verdict] || 0) + 1;
   const total = results.length;
-  const failed = counts.FAIL > 0;
+  const failed = counts.FAIL > 0 || (strict && counts.UNVERIFIABLE > 0);
   return {
     total,
     pass: counts.PASS,
     fail: counts.FAIL,
     unverifiable: counts.UNVERIFIABLE,
+    strict: !!strict,
     passed: !failed,
     exitCode: failed ? 1 : 0,
   };

@@ -45,6 +45,8 @@ spec-verify check --spec SPEC.md --src ./build
 - Exit code **1** if any criterion fails.
 - Exit code **2** on a usage/IO error.
 
+Add `--strict` to also fail on `UNVERIFIABLE` (see below) — recommended for CI.
+
 ### Options
 
 | Flag | Description |
@@ -57,7 +59,23 @@ spec-verify check --spec SPEC.md --src ./build
 | `--smart` | Use the smarter judge model (`claude-sonnet-4-6`) |
 | `--no-run-scripts` | Don't execute npm scripts referenced by directives |
 | `--no-judge` | Skip the LLM judge; undecided criteria become UNVERIFIABLE |
+| `--strict` | Treat `UNVERIFIABLE` criteria as failures (exit 1) — **recommended for CI** |
 | `--require-modal` | Only treat bullets containing must/shall/should as criteria |
+
+### Strict mode (recommended for CI)
+
+By default `UNVERIFIABLE` does **not** fail the gate: a criterion the tool could
+not check (for example, a subjective one with no API key for the judge) is
+reported but tolerated. That is convenient locally but dangerous in CI, where a
+pipeline with no `ANTHROPIC_API_KEY` would otherwise go green simply because
+nothing could be judged.
+
+Pass `--strict` to count every `UNVERIFIABLE` as a failure (exit 1). This makes
+CI honest: the gate only passes when every criterion was actually verified.
+
+```bash
+spec-verify check --spec SPEC.md --src ./build --strict
+```
 
 ### The LLM judge (bring your own key)
 
@@ -97,7 +115,7 @@ evidence and are handed to the LLM judge.
 | Directive | Args | Determines verdict by |
 | --- | --- | --- |
 | `file-exists` | `path` or `glob` | A matching file exists |
-| `grep` | `pattern`, `glob?`, `flags?`, `min?` | The regex matches in ≥ `min` files (default 1) |
+| `grep` | `pattern`, `glob?`, `flags?`, `min?` | The regex matches ≥ `min` times total across files (default 1) |
 | `export-exists` | `name`, `glob?` | A JS/TS module exports the named symbol |
 | `route-exists` | `path`, `method?`, `glob?` | A route declaration references the path |
 | `npm-script` | `name`, `timeoutMs?` | `npm run <name>` exits 0 (the suite actually runs) |
@@ -152,10 +170,13 @@ Swap the judge for a mock in tests with `createMockJudge(fn)`.
 ## CI example (GitHub Actions)
 
 ```yaml
-- run: npx spec-verify check --spec SPEC.md --src .
+- run: npx spec-verify check --spec SPEC.md --src . --strict
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
+
+`--strict` is recommended in CI so the gate fails (rather than silently passes)
+if any criterion could not be verified.
 
 ## Limitations
 

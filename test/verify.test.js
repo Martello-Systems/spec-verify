@@ -194,6 +194,41 @@ test('summarize: only-unverifiable passes the gate', () => {
   assert.equal(s.passed, true);
 });
 
+/* ----- --strict: UNVERIFIABLE becomes a failure ----- */
+
+test('summarize: --strict treats UNVERIFIABLE as a failure (exit 1)', () => {
+  const s = summarize([{ verdict: 'UNVERIFIABLE' }, { verdict: 'PASS' }], { strict: true });
+  assert.equal(s.exitCode, 1, 'an unverifiable criterion fails the gate under --strict');
+  assert.equal(s.passed, false);
+  assert.equal(s.unverifiable, 1);
+});
+
+test('summarize: --strict with all PASS still passes', () => {
+  const s = summarize([{ verdict: 'PASS' }, { verdict: 'PASS' }], { strict: true });
+  assert.equal(s.exitCode, 0);
+  assert.equal(s.passed, true);
+});
+
+test('summarize: default (non-strict) leaves UNVERIFIABLE non-fatal', () => {
+  // Guards that the new option does not change default behavior.
+  const s = summarize([{ verdict: 'UNVERIFIABLE' }]);
+  assert.equal(s.exitCode, 0);
+  assert.equal(s.passed, true);
+});
+
+test('verify: --strict flips an UNVERIFIABLE-only outcome to exit 1', async () => {
+  const spec = await readFile(SPEC, 'utf8');
+  // No judge -> the subjective criterion is UNVERIFIABLE. Default exits 0;
+  // strict must exit 1 because something could not be verified.
+  const loose = await verify({ spec, srcDir: COMPLETE, judge: null });
+  assert.equal(loose.summary.exitCode, 0, 'default: unverifiable is non-fatal');
+
+  const strict = await verify({ spec, srcDir: COMPLETE, judge: null, strict: true });
+  assert.equal(strict.summary.unverifiable >= 1, true);
+  assert.equal(strict.summary.exitCode, 1, 'strict: unverifiable fails the gate');
+  assert.equal(strict.summary.passed, false);
+});
+
 test('keywordsFor drops stopwords and short tokens', () => {
   const kws = keywordsFor('The service must expose a /health endpoint');
   assert.ok(kws.includes('service'));
