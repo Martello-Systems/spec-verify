@@ -17,7 +17,7 @@
     ".env.example"
   ],
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test test/evidence.test.js test/judge.test.js test/parse-spec.test.js test/verify.test.js",
     "lint": "eslint .",
     "start": "node bin/spec-verify.js"
   },

@@ -67,8 +67,19 @@ test('createAnthropicJudge works with an injected mock client', async () => {
     messages: {
       async create(req) {
         assert.equal(req.model, DEFAULT_MODEL);
-        assert.ok(req.output_config.format.schema.properties.verdict);
-        return { content: [{ type: 'text', text: '{"verdict":"PASS","reason":"looks good"}' }] };
+        // Structured output is obtained via forced tool use on @anthropic-ai/sdk@^0.40.
+        assert.equal(req.tools[0].name, 'record_verdict');
+        assert.ok(req.tools[0].input_schema.properties.verdict);
+        assert.deepEqual(req.tool_choice, { type: 'tool', name: 'record_verdict' });
+        return {
+          content: [
+            {
+              type: 'tool_use',
+              name: 'record_verdict',
+              input: { verdict: 'PASS', reason: 'looks good' },
+            },
+          ],
+        };
       },
     },
   };
@@ -120,7 +131,52 @@ test('buildJudgePrompt instructs JSON-only output and the three verdicts', () =>
   for (const v of VERDICTS) assert.match(system, new RegExp(v));
 });
 
+/** A recorded forced-tool-use Anthropic response carrying a record_verdict call. */
+function recordedToolUse(verdict, reason, extra = {}) {
+  return {
+    stop_reason: 'tool_use',
+    content: [
+      { type: 'tool_use', id: 'toolu_x', name: 'record_verdict', input: { verdict, reason } },
+    ],
+    ...extra,
+  };
+}
+
 /* ---- response parsing: fixtured Anthropic responses, no key ---- */
+
+test('parseJudgeResponse: reads the verdict from a record_verdict tool_use block', () => {
+  const out = parseJudgeResponse(recordedToolUse('PASS', 'criterion clearly satisfied'));
+  assert.equal(out.verdict, 'PASS');
+  assert.equal(out.reason, 'criterion clearly satisfied');
+});
+
+test('parseJudgeResponse: tool_use is preferred even when a text block is also present', () => {
+  const out = parseJudgeResponse({
+    stop_reason: 'tool_use',
+    content: [
+      { type: 'text', text: 'Let me think...' },
+      { type: 'tool_use', name: 'record_verdict', input: { verdict: 'FAIL', reason: 'no route' } },
+    ],
+  });
+  assert.equal(out.verdict, 'FAIL');
+  assert.equal(out.reason, 'no route');
+});
+
+test('parseJudgeResponse: tool_use with an unknown verdict normalizes to UNVERIFIABLE', () => {
+  const out = parseJudgeResponse(recordedToolUse('definitely', 'r'));
+  assert.equal(out.verdict, 'UNVERIFIABLE');
+});
+
+test('parseJudgeResponse: a foreign tool_use name falls through to the text path', () => {
+  const out = parseJudgeResponse({
+    content: [
+      { type: 'tool_use', name: 'something_else', input: { verdict: 'PASS' } },
+      { type: 'text', text: '{"verdict":"FAIL","reason":"from text"}' },
+    ],
+  });
+  assert.equal(out.verdict, 'FAIL');
+  assert.equal(out.reason, 'from text');
+});
 
 test('parseJudgeResponse: well-formed verdict JSON', () => {
   const out = parseJudgeResponse(recorded('{"verdict":"FAIL","reason":"missing route"}'));
@@ -206,7 +262,8 @@ test('createAnthropicJudge: prompt assembly reaches the client correctly', async
   assert.match(seen.system, /acceptance reviewer/i);
   assert.match(seen.messages[0].content, /Exposes \/health/);
   assert.match(seen.messages[0].content, /\[route-exists\] found/);
-  assert.deepEqual(seen.output_config.format.schema.required, ['verdict', 'reason']);
+  assert.deepEqual(seen.tools[0].input_schema.required, ['verdict', 'reason']);
+  assert.deepEqual(seen.tool_choice, { type: 'tool', name: 'record_verdict' });
 });
 
 test('createAnthropicJudge: malformed JSON from the model is UNVERIFIABLE', async () => {

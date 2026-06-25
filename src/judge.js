@@ -92,20 +92,25 @@ export function createAnthropicJudge(opts = {}) {
           max_tokens: maxTokens,
           system,
           messages: [{ role: 'user', content: user }],
-          output_config: {
-            format: {
-              type: 'json_schema',
-              schema: {
+          // Forced tool use is how structured output is obtained on
+          // @anthropic-ai/sdk@^0.40. We require the model to call record_verdict
+          // and read the verdict straight out of the tool_use block's input.
+          tools: [
+            {
+              name: 'record_verdict',
+              description:
+                'Record the acceptance verdict for the criterion under review.',
+              input_schema: {
                 type: 'object',
                 properties: {
                   verdict: { type: 'string', enum: VERDICTS },
                   reason: { type: 'string' },
                 },
                 required: ['verdict', 'reason'],
-                additionalProperties: false,
               },
             },
-          },
+          ],
+          tool_choice: { type: 'tool', name: 'record_verdict' },
         });
       } catch (e) {
         // Network error, auth error, rate limit, etc. Never crash the gate:
@@ -124,7 +129,8 @@ export function createAnthropicJudge(opts = {}) {
 /**
  * Turn a raw Anthropic Messages response into a normalized {verdict, reason}.
  * Handles, without ever throwing:
- *   - well-formed verdict JSON
+ *   - a forced `record_verdict` tool_use block (the primary path)
+ *   - well-formed verdict JSON in a text block (secondary, lenient fallback)
  *   - a safety refusal (stop_reason === 'refusal')
  *   - an empty / missing content array
  *   - malformed or partial JSON (extracts a fenced/embedded JSON object if any)
@@ -139,6 +145,15 @@ export function parseJudgeResponse(response) {
     };
   }
 
+  // Primary path: forced tool use. Read the verdict straight out of the
+  // record_verdict tool_use block's structured input.
+  const toolInput = toolVerdictOf(response);
+  if (toolInput) {
+    return normalizeVerdict(toolInput);
+  }
+
+  // Secondary path: a model (or a recorded fixture) may put the verdict JSON in
+  // a text block instead. Recover it leniently before giving up.
   const text = textOf(response);
   if (!text) {
     return { verdict: 'UNVERIFIABLE', reason: 'LLM judge returned an empty response' };
@@ -255,6 +270,18 @@ function textOf(response) {
     .map((b) => b.text)
     .join('')
     .trim();
+}
+
+/**
+ * Extract the structured input of the forced `record_verdict` tool call, or
+ * null if the response carries no such block.
+ */
+function toolVerdictOf(response) {
+  if (!response || !Array.isArray(response.content)) return null;
+  const block = response.content.find(
+    (b) => b && b.type === 'tool_use' && b.name === 'record_verdict' && b.input,
+  );
+  return block ? block.input : null;
 }
 
 function truncateDetails(details) {

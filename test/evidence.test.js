@@ -170,3 +170,13 @@ test('runCommand times out long processes', async () => {
   });
   assert.equal(r.timedOut, true);
 });
+
+// Regression guard for the Windows `spawn npm ENOENT`/`EINVAL` bug: npm is a
+// `.cmd` shim there and must be launched through the shell. This runs npm on
+// whatever platform CI is using, so it covers both win32 and POSIX.
+test('runCommand resolves the npm shim cross-platform', async () => {
+  const r = await runCommand('npm', ['--version'], { cwd: COMPLETE, timeoutMs: 30000 });
+  assert.equal(r.timedOut, false);
+  assert.equal(r.code, 0, `npm --version should exit 0, got ${r.code}: ${r.stderr}`);
+  assert.match(r.stdout.trim(), /^\d+\.\d+\.\d+/);
+});
