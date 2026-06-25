@@ -1,7 +1,7 @@
 import js from '@eslint/js';
 
 /**
- * Flat ESLint config (ESLint 9+). Plain JavaScript / ESM — matches the house
+ * Flat ESLint config (ESLint 9+). Plain JavaScript / ESM, matches the house
  * stack (no TypeScript). Lints src, bin, and tests against the recommended
  * ruleset with Node + ESM globals.
  */

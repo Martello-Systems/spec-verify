@@ -90,7 +90,7 @@ export async function verify({ spec, srcDir, judge, parseOpts = {}, ctx = {} }) 
   const criteria = extractCriteria(spec, parseOpts);
   if (criteria.length === 0) {
     throw new SpecVerifyInputError(
-      'no acceptance criteria found in the spec — expected a checklist ' +
+      'no acceptance criteria found in the spec: expected a checklist ' +
         '(`- [ ] ...`), a must/shall bullet, or items under an "Acceptance ' +
         'Criteria" heading',
       'NO_CRITERIA',

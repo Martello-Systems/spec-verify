@@ -2,7 +2,7 @@ import express from 'express';
 
 const app = express();
 
-// POST /orders — create an order. (declared via the Express router form)
+// POST /orders: create an order. (declared via the Express router form)
 app.post('/orders', (req, res) => {
   res.status(201).json({ ok: true });
 });

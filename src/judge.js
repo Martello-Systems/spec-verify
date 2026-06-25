@@ -108,7 +108,7 @@ export function createAnthropicJudge(opts = {}) {
           },
         });
       } catch (e) {
-        // Network error, auth error, rate limit, etc. Never crash the gate —
+        // Network error, auth error, rate limit, etc. Never crash the gate:
         // degrade to UNVERIFIABLE with a readable reason.
         return {
           verdict: 'UNVERIFIABLE',
@@ -172,7 +172,7 @@ export function buildJudgePrompt({ criterion, evidence = [], codeContext = '' })
     'Respond ONLY with JSON: {"verdict": "PASS"|"FAIL"|"UNVERIFIABLE", "reason": "..."}. ' +
     'Use PASS only when the evidence clearly shows the criterion is satisfied. ' +
     'Use FAIL when the evidence clearly shows it is not. ' +
-    'Use UNVERIFIABLE when you cannot tell from the provided material — never guess.';
+    'Use UNVERIFIABLE when you cannot tell from the provided material. Never guess.';
 
   const evidenceLines = evidence.length
     ? evidence
@@ -202,7 +202,7 @@ export function buildJudgePrompt({ criterion, evidence = [], codeContext = '' })
  * object could be recovered. Handles three real-world model behaviors:
  *   1. clean JSON
  *   2. JSON wrapped in a ```json fenced block or surrounded by prose
- *   3. partial / malformed JSON (returns undefined — caller degrades gracefully)
+ *   3. partial / malformed JSON (returns undefined; caller degrades gracefully)
  */
 function parseLenientJson(text) {
   const trimmed = String(text).trim();

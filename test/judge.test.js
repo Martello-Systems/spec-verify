@@ -150,7 +150,7 @@ test('parseJudgeResponse: malformed JSON degrades to UNVERIFIABLE with a reason'
 });
 
 test('parseJudgeResponse: partial JSON object recovers the verdict if balanced', () => {
-  // A complete object embedded after a partial fragment — recovery grabs {..}.
+  // A complete object embedded after a partial fragment: recovery grabs {..}.
   const out = parseJudgeResponse(recorded('oops {"verdict":"FAIL","reason":"r"}'));
   assert.equal(out.verdict, 'FAIL');
 });

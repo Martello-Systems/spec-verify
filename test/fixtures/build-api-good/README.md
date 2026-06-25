@@ -12,4 +12,4 @@ Unauthenticated requests receive a 401.
 
 ## Endpoints
 
-- `POST /orders` — create an order
+- `POST /orders`: create an order

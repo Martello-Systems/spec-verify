@@ -9,4 +9,4 @@ A tiny widget service.
 
 ## Endpoints
 
-- `GET /health` — liveness probe
+- `GET /health`: liveness probe

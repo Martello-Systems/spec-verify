@@ -30,7 +30,7 @@ export function formatMarkdown({ results, summary }, { title = 'spec-verify repo
   lines.push(`# ${title}`);
   lines.push('');
   lines.push(
-    `**Result: ${summary.passed ? 'PASSED' : 'FAILED'}** — ` +
+    `**Result: ${summary.passed ? 'PASSED' : 'FAILED'}**. ` +
       `${summary.pass} passed, ${summary.fail} failed, ${summary.unverifiable} unverifiable ` +
       `of ${summary.total} criteria.`,
   );

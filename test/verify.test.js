@@ -67,7 +67,7 @@ test('DETECTION: good API build → all criteria PASS, exit 0', async () => {
 
 test('DETECTION: build missing a route + an export → both flagged, exit 1', async () => {
   const spec = await readFile(API_SPEC, 'utf8');
-  // A judge that always PASSes — any FAIL must come from deterministic checks,
+  // A judge that always PASSes; any FAIL must come from deterministic checks,
   // proving spec-verify catches the silently-skipped criteria on its own.
   const { results, summary } = await verify({ spec, srcDir: API_MISSING, judge: passJudge });
   assert.equal(summary.exitCode, 1);
@@ -129,7 +129,7 @@ test('assertSrcDir: rejects a file path with SRC_NOT_DIR', async () => {
 
 test('verify: explicit ctx.files bypasses the filesystem check', async () => {
   const spec = await readFile(SPEC, 'utf8');
-  // srcDir does not exist, but ctx.files is supplied — must not throw on src.
+  // srcDir does not exist, but ctx.files is supplied, so it must not throw on src.
   const { summary } = await verify({
     spec,
     srcDir: '/nonexistent',

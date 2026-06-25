@@ -1,4 +1,4 @@
-# Orders API — Requirements
+# Orders API: Requirements
 
 This document phrases its acceptance criteria in plain prose (no checklist
 checkboxes) to exercise phrasing-variation robustness. Each line still carries a

@@ -97,7 +97,7 @@ export function parseSpec(markdown, opts = {}) {
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
 
-    // Track fenced code blocks — never parse criteria out of code.
+    // Track fenced code blocks: never parse criteria out of code.
     if (/^\s*(```|~~~)/.test(raw)) {
       inFence = !inFence;
       continue;

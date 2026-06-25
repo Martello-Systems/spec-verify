@@ -1,4 +1,4 @@
-# Widget Service — Acceptance Criteria
+# Widget Service: Acceptance Criteria
 
 The deliverable is a small Node service. The following criteria must all hold.
 

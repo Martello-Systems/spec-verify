@@ -10,8 +10,8 @@ and the finished codebase it produced, and emits a per-criterion
 CI-friendly acceptance gate for AI-built software: wire it into a pipeline and it
 exits non-zero the moment a required criterion isn't actually met.
 
-The trick is to **gather deterministic evidence first** — file existence, content
-grep, route/export presence, "does the test suite actually pass" — and only fall
+The trick is to **gather deterministic evidence first** (file existence, content
+grep, route/export presence, "does the test suite actually pass") and only fall
 back to an LLM judge for the genuinely subjective remainder. Deterministic checks
 are fast, free, and not subject to a model's optimism; the LLM only adjudicates
 what a regex can't.
@@ -19,7 +19,7 @@ what a regex can't.
 ## Why
 
 LLM agents are confident. They will tell you the feature is "done" and the tests
-"pass." `spec-verify` doesn't take their word for it — it re-derives the verdict
+"pass." `spec-verify` doesn't take their word for it: it re-derives the verdict
 from the artifacts on disk. A criterion only PASSes when the evidence shows it.
 
 ## Install
@@ -62,7 +62,7 @@ spec-verify check --spec SPEC.md --src ./build
 ### The LLM judge (bring your own key)
 
 The judge uses the [Anthropic SDK](https://www.npmjs.com/package/@anthropic-ai/sdk)
-and reads `ANTHROPIC_API_KEY` from the environment — **no key is ever hardcoded**.
+and reads `ANTHROPIC_API_KEY` from the environment: **no key is ever hardcoded**.
 If the key is absent, criteria that need the judge are reported as `UNVERIFIABLE`
 (which does not fail the gate) and a warning is printed. Default model is the cheap
 `claude-haiku-4-5-20251001`; pass `--smart` for `claude-sonnet-4-6`.
@@ -166,28 +166,28 @@ Swap the judge for a mock in tests with `createMockJudge(fn)`.
 - **The LLM judge is a fallback, not the moat.** Deterministic directives decide
   the verdict whenever they can; the judge only adjudicates criteria with no
   directive. Lean on directives for anything you want CI to enforce hard.
-- **`npm-script` runs the script** in the target dir — only enable it on builds
+- **`npm-script` runs the script** in the target dir: only enable it on builds
   you trust, or pass `--no-run-scripts`.
 - **Binary files are skipped** (NUL-byte heuristic), so grep/export/route checks
   apply to text sources only.
 
 ## Demo
 
-> _Demo recording placeholder — a short asciinema/GIF of `spec-verify check`
+> _Demo recording placeholder: a short asciinema/GIF of `spec-verify check`
 > catching a silently-skipped criterion in CI will live here._
 
 ## Development
 
 ```bash
 npm install
-npm test     # node:test — deterministic detection + a fixtured LLM-judge seam
+npm test     # node:test, deterministic detection + a fixtured LLM-judge seam
 npm run lint # ESLint (flat config, plain ESM)
 ```
 
 The LLM judge has a clean seam: `buildJudgePrompt` (prompt assembly) and
 `parseJudgeResponse` (response parsing) are pure and unit-tested against
-recorded Anthropic responses — well-formed, malformed, partial, refusal, and
-empty — with **no API key and no network**. A single live smoke test runs only
+recorded Anthropic responses (well-formed, malformed, partial, refusal, and
+empty) with **no API key and no network**. A single live smoke test runs only
 when `ANTHROPIC_API_KEY` is set, and skips cleanly otherwise. Detection is
 proven against two spec/build fixture pairs: a good build where every criterion
 passes, and a build that silently skips a criterion, which must be flagged.
@@ -200,6 +200,6 @@ MIT © 2026 Martello Systems. See [LICENSE](./LICENSE).
 
 ## Built by Martello Systems
 
-`spec-verify` is part of the open-source toolkit from **[Martello Systems](https://martellosystems.com)** — we ship AI-built software, spec to delivery in days. If this saved you time, come [see what we do](https://martellosystems.com).
+`spec-verify` is part of the open-source toolkit from **[Martello Systems](https://martellosystems.com)**. We ship AI-built software, spec to delivery in days. If this saved you time, come [see what we do](https://martellosystems.com).
 
 Licensed under the [Apache License 2.0](LICENSE).
