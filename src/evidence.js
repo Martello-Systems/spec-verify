@@ -293,19 +293,24 @@ export async function checkExportExists(srcDir, args, ctx = {}) {
  * route-exists: does any file declare a route at the given path?
  * args: { path: string, method?: string, glob?: string }
  *
- * Matches Express/Fastify/Koa-style declarations and config-driven route
- * objects. Crucially it requires the path to co-occur with an actual *routing
- * construct* — a method call, a `.route()` chain, a route-config object that
- * also carries a `method:` key, or a request-URL comparison. A path that merely
- * appears as a quoted string in a comment, a log line, a nav menu, or a test
- * constant is NOT a route and must not produce a (false) PASS. Comments (`//`
- * and block) are stripped before matching, so a route that only exists inside a
- * comment does not count.
+ * Two complementary detectors, and a PASS via EITHER one suffices:
  *
- * NOT covered: Next.js (and similar) file-convention routes, where the path is
- * encoded in the file path (e.g. `app/widgets/route.ts`) and never appears as a
- * literal in code. Assert those with `file-exists` instead, e.g.
- * `<!-- check: file-exists glob="app/**\/route.{js,ts}" -->`.
+ *   1. Code routes (Express/Fastify/Koa, config-driven routers, raw http): the
+ *      path must co-occur with an actual *routing construct* — a method call, a
+ *      `.route()` chain, a route-config object that also carries a `method:` key,
+ *      or a request-URL comparison. A path that merely appears as a quoted string
+ *      in a comment, a log line, a nav menu, or a test constant is NOT a route
+ *      and must not produce a (false) PASS. Comments are stripped before matching.
+ *
+ *   2. Next.js file-convention routes (App + Pages Router), where the path is
+ *      encoded in the *file path* and never appears as a literal in code — e.g.
+ *      `app/widgets/route.ts`, `app/widgets/page.tsx`, `pages/widgets.tsx`,
+ *      `pages/api/widgets.ts`. Handles the `src/` prefix, route groups `(group)`
+ *      that don't affect the URL, the root path, and dynamic/catch-all segments
+ *      (`[id]`, `[...slug]`) mapped conservatively against the request path.
+ *
+ * Deeply-dynamic catch-all matching is best-effort: a literal request segment is
+ * allowed to match a `[param]`/`[...catchall]` directory at that position.
  */
 export async function checkRouteExists(srcDir, args, ctx = {}) {
   const routePath = args.path;
@@ -339,12 +344,25 @@ export async function checkRouteExists(srcDir, args, ctx = {}) {
   const globs = expandBraces(args.glob || '**/*.{js,jsx,ts,tsx,mjs,cjs}');
   // Strip comments first: a route that only exists in a comment is not a route.
   const sub = await orGrep(srcDir, combined, globs, ctx, { stripComments: true });
+
+  // Next.js file-convention routes: the URL lives in the file path, not in code.
+  const files = ctx.files || (await listFiles(srcDir));
+  const nextHits = matchNextRouteFiles(files, routePath);
+
+  const hits = [...new Set([...sub.hits, ...nextHits])].sort();
+  const ok = hits.length > 0;
   return ev(
     'route-exists',
     true,
-    sub.ok ? 'PASS' : 'FAIL',
-    sub.ok ? `route "${routePath}" referenced in ${sub.hits.length} file(s)` : `route "${routePath}" not found`,
-    { path: routePath, method: args.method || 'any', hits: sub.hits.slice(0, 25), hitCount: sub.hits.length },
+    ok ? 'PASS' : 'FAIL',
+    ok ? `route "${routePath}" referenced in ${hits.length} file(s)` : `route "${routePath}" not found`,
+    {
+      path: routePath,
+      method: args.method || 'any',
+      hits: hits.slice(0, 25),
+      hitCount: hits.length,
+      nextHits: nextHits.slice(0, 25),
+    },
   );
 }
 
@@ -486,6 +504,100 @@ function stripComments(src) {
     out += c;
   }
   return out;
+}
+
+/* --------------------------------------------------------------------------
+ * Next.js file-convention route matching.
+ *
+ * The App Router and Pages Router encode the URL in the file path rather than
+ * in code, so route-exists must look at the file list, not file contents.
+ * ------------------------------------------------------------------------ */
+
+const NEXT_EXT_RE = /\.(?:js|jsx|ts|tsx)$/;
+
+/** Is this a single dynamic segment dir/name: `[id]` (also matches `[...x]`). */
+function isDynamicSeg(s) {
+  return /^\[[^/]+\]$/.test(s);
+}
+/** Is this a catch-all segment: `[...slug]` or optional `[[...slug]]`. */
+function isCatchAllSeg(s) {
+  return /^\[\[?\.\.\.[^/\]]+\]\]?$/.test(s);
+}
+function isOptionalCatchAllSeg(s) {
+  return /^\[\[\.\.\.[^/\]]+\]\]$/.test(s);
+}
+
+/**
+ * Match a Next.js route's segment array (directory/file segments, which may be
+ * literal, `[param]`, or `[...catchall]`) against the concrete request-path
+ * segments. Conservative: a literal request segment matches a literal of the
+ * same name OR a dynamic segment at that position; a catch-all (which must be
+ * terminal) absorbs the remaining request segments.
+ */
+function matchRouteSegments(routeSegs, urlSegs) {
+  let d = 0;
+  let u = 0;
+  while (d < routeSegs.length) {
+    const ds = routeSegs[d];
+    if (isCatchAllSeg(ds)) {
+      if (d !== routeSegs.length - 1) return false; // catch-all must be last
+      const remaining = urlSegs.length - u;
+      return isOptionalCatchAllSeg(ds) ? remaining >= 0 : remaining >= 1;
+    }
+    if (u >= urlSegs.length) return false;
+    if (isDynamicSeg(ds)) {
+      d++;
+      u++;
+      continue;
+    }
+    if (ds === urlSegs[u]) {
+      d++;
+      u++;
+      continue;
+    }
+    return false;
+  }
+  return u === urlSegs.length;
+}
+
+/**
+ * Return the subset of `files` that are Next.js file-convention route files for
+ * the given request path. Supports the App Router (`app/`, `src/app/`, route
+ * groups, `route.*`/`page.*` terminals) and the Pages Router (`pages/`,
+ * `src/pages/`, including `index.*` and API routes). POSIX-relative paths.
+ */
+export function matchNextRouteFiles(files, routePath) {
+  const urlSegs = String(routePath).split('/').filter(Boolean);
+  const hits = [];
+  for (const file of files) {
+    let parts = file.split('/');
+    if (parts[0] === 'src') parts = parts.slice(1);
+    const base = parts[0];
+    if (base !== 'app' && base !== 'pages') continue;
+    const rest = parts.slice(1);
+    if (rest.length === 0) continue;
+    const filename = rest[rest.length - 1];
+    if (!NEXT_EXT_RE.test(filename)) continue;
+    const nameNoExt = filename.replace(NEXT_EXT_RE, '');
+
+    if (base === 'app') {
+      // Only route.* and page.* files define a routable URL.
+      if (nameNoExt !== 'route' && nameNoExt !== 'page') continue;
+      const dirSegs = rest.slice(0, -1);
+      // Route groups `(group)` don't affect the URL; private `_x` and parallel
+      // `@slot` folders are not part of the public route tree.
+      if (dirSegs.some((s) => s.startsWith('_') || s.startsWith('@'))) continue;
+      const routeSegs = dirSegs.filter((s) => !/^\(.+\)$/.test(s));
+      if (matchRouteSegments(routeSegs, urlSegs)) hits.push(file);
+    } else {
+      // Pages Router. Special files are not routes.
+      if (/^_(app|document|error)$/.test(nameNoExt)) continue;
+      const dirSegs = rest.slice(0, -1);
+      const routeSegs = nameNoExt === 'index' ? dirSegs : [...dirSegs, nameNoExt];
+      if (matchRouteSegments(routeSegs, urlSegs)) hits.push(file);
+    }
+  }
+  return hits;
 }
 
 async function readPackageJson(srcDir, ctx) {

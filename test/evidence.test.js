@@ -12,6 +12,7 @@ import {
   checkNpmScript,
   checkExportExists,
   checkRouteExists,
+  matchNextRouteFiles,
   gatherFromDirective,
   runCommand,
 } from '../src/evidence.js';
@@ -31,6 +32,10 @@ const ROUTE_CONFIG_NAV = routeCase('config-nav');
 const ROUTE_CONFIG_TEST = routeCase('config-test');
 const ROUTE_FASTIFY_CALL = routeCase('fastify-call');
 const ROUTE_CHAIN = routeCase('route-chain');
+const ROUTE_NEXT_APP = routeCase('next-app-router');
+const ROUTE_NEXT_PAGES_API = routeCase('next-pages-api');
+const ROUTE_NEXT_DYNAMIC = routeCase('next-dynamic');
+const ROUTE_NEXT_NEGATIVE = routeCase('next-negative');
 const GREP_CASES = path.join(here, 'fixtures', 'grep-cases');
 
 /* ----- glob ----- */
@@ -261,6 +266,89 @@ test('checkRouteExists: app.route("/x").get(...) chain PASSes', async () => {
   // so the tightened matcher wrongly FAILed. A dedicated .route() pattern fixes it.
   const e = await checkRouteExists(ROUTE_CHAIN, { path: '/widgets' });
   assert.equal(e.verdict, 'PASS');
+});
+
+/* --- Next.js file-convention routes (path lives in the file path) --- */
+
+// OLD behavior: route-exists was code-grep only, so a Next.js route whose path
+// is encoded in the file path (no literal in code) wrongly FAILed.
+
+test('checkRouteExists: Next.js App Router app/widgets/route.ts PASSes for /widgets', async () => {
+  const e = await checkRouteExists(ROUTE_NEXT_APP, { path: '/widgets' });
+  assert.equal(e.verdict, 'PASS');
+  assert.ok(e.details.nextHits.some((f) => /app\/widgets\/route\.ts$/.test(f)));
+});
+
+test('checkRouteExists: Next.js Pages API pages/api/widgets.ts PASSes for /api/widgets', async () => {
+  const e = await checkRouteExists(ROUTE_NEXT_PAGES_API, { path: '/api/widgets' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+test('checkRouteExists: Next.js dynamic app/users/[id]/route.ts PASSes for /users/123', async () => {
+  const e = await checkRouteExists(ROUTE_NEXT_DYNAMIC, { path: '/users/123' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+test('checkRouteExists: Next.js dynamic route does NOT over-match an unrelated path', async () => {
+  // /widgets must not match app/users/[id]/route.ts (literal "users" != "widgets").
+  const e = await checkRouteExists(ROUTE_NEXT_DYNAMIC, { path: '/widgets' });
+  assert.equal(e.verdict, 'FAIL', 'a [id] route must not greedily match unrelated paths');
+});
+
+test('checkRouteExists: no route file and no code route is still FAIL', async () => {
+  // A Next.js project that routes /about but not /widgets must FAIL for /widgets.
+  const e = await checkRouteExists(ROUTE_NEXT_NEGATIVE, { path: '/widgets' });
+  assert.equal(e.verdict, 'FAIL');
+});
+
+/* --- matchNextRouteFiles unit coverage (file-list -> route mapping) --- */
+
+test('matchNextRouteFiles: App Router, src/ prefix, route groups, and root', () => {
+  assert.deepEqual(
+    matchNextRouteFiles(['app/widgets/route.ts'], '/widgets'),
+    ['app/widgets/route.ts'],
+  );
+  assert.deepEqual(
+    matchNextRouteFiles(['src/app/widgets/page.tsx'], '/widgets'),
+    ['src/app/widgets/page.tsx'],
+  );
+  // A route group `(marketing)` does not affect the URL.
+  assert.deepEqual(
+    matchNextRouteFiles(['app/(marketing)/widgets/page.tsx'], '/widgets'),
+    ['app/(marketing)/widgets/page.tsx'],
+  );
+  // Root path maps to app/page.* or app/route.*.
+  assert.deepEqual(matchNextRouteFiles(['app/page.tsx'], '/'), ['app/page.tsx']);
+});
+
+test('matchNextRouteFiles: Pages Router forms (file, index, api, dynamic)', () => {
+  assert.deepEqual(matchNextRouteFiles(['pages/widgets.tsx'], '/widgets'), ['pages/widgets.tsx']);
+  assert.deepEqual(
+    matchNextRouteFiles(['pages/widgets/index.tsx'], '/widgets'),
+    ['pages/widgets/index.tsx'],
+  );
+  assert.deepEqual(
+    matchNextRouteFiles(['pages/api/widgets.ts'], '/api/widgets'),
+    ['pages/api/widgets.ts'],
+  );
+  assert.deepEqual(
+    matchNextRouteFiles(['pages/users/[id].ts'], '/users/42'),
+    ['pages/users/[id].ts'],
+  );
+  assert.deepEqual(matchNextRouteFiles(['pages/index.tsx'], '/'), ['pages/index.tsx']);
+});
+
+test('matchNextRouteFiles: catch-all absorbs remaining segments; specials/non-routes ignored', () => {
+  assert.deepEqual(
+    matchNextRouteFiles(['app/docs/[...slug]/route.ts'], '/docs/a/b/c'),
+    ['app/docs/[...slug]/route.ts'],
+  );
+  // layout/loading/_app/_document and non-app/pages files are not routes.
+  assert.deepEqual(matchNextRouteFiles(['app/widgets/layout.tsx'], '/widgets'), []);
+  assert.deepEqual(matchNextRouteFiles(['pages/_app.tsx'], '/_app'), []);
+  assert.deepEqual(matchNextRouteFiles(['lib/widgets.ts'], '/widgets'), []);
+  // A required catch-all needs at least one segment.
+  assert.deepEqual(matchNextRouteFiles(['app/docs/[...slug]/route.ts'], '/docs'), []);
 });
 
 /* ----- npm-script detection (no execution) ----- */

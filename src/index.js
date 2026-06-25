@@ -3,7 +3,7 @@
  *
  * Programmatic usage:
  *
- *   import { verify, createAnthropicJudge } from 'spec-verify';
+ *   import { verify, createAnthropicJudge } from '@martello-systems/spec-verify';
  *   const { results, summary } = await verify({
  *     spec: fs.readFileSync('SPEC.md', 'utf8'),
  *     srcDir: './build',
@@ -22,6 +22,7 @@ export {
   checkNpmScript,
   checkExportExists,
   checkRouteExists,
+  matchNextRouteFiles,
   gatherFromDirective,
   runCommand,
 } from './evidence.js';

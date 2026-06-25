@@ -26,8 +26,10 @@ from the artifacts on disk. A criterion only PASSes when the evidence shows it.
 
 ```bash
 npm install
-# or, as a dependency:
-npm install spec-verify
+# or globally (the CLI command stays `spec-verify`):
+npm i -g @martello-systems/spec-verify
+# or as a dependency:
+npm install @martello-systems/spec-verify
 ```
 
 Requires Node 18+.
@@ -122,17 +124,19 @@ evidence and are handed to the LLM judge.
 
 Aliases: `file`/`contains`/`script`/`test`/`export`/`route` map to the above.
 
-`route-exists` matches the path where it appears as a routing construct in code:
-a router method call (`app.get('/x')`), a `.route('/x')` chain, a config object
-that also carries a `method:` key, or a `req.url === '/x'` comparison. A path
-that only shows up in a comment, a nav menu, or a test constant does **not**
-count. For **Next.js (App/Pages) file-convention routes** the path is encoded in
-the file path and never appears as a literal in code, so assert those with
-`file-exists`, not `route-exists`:
+`route-exists` detects routes two ways, and a match via **either** is a PASS:
 
-```markdown
-- [ ] A /widgets route handler exists <!-- check: file-exists glob="app/**/route.{js,ts}" -->
-```
+- **Code routes** (Express / Fastify / Koa, config-driven routers, raw `http`):
+  the path must appear as a routing construct — a method call (`app.get('/x')`),
+  a `.route('/x')` chain, a config object that also carries a `method:` key, or a
+  `req.url === '/x'` comparison. A path that only shows up in a comment, a nav
+  menu, or a test constant does **not** count.
+- **Next.js file-convention routes** (App + Pages Router): the path encoded in
+  the file path is matched against the file tree, e.g. `app/widgets/route.ts`,
+  `app/widgets/page.tsx`, `pages/widgets.tsx`, `pages/api/widgets.ts`. The `src/`
+  prefix, route groups `(group)`, the root path, and dynamic/catch-all segments
+  (`/users/123` → `app/users/[id]/route.ts`) are handled; deeply-dynamic
+  catch-all matching is best-effort.
 
 ## Example output
 
@@ -165,7 +169,7 @@ With `--json`:
 
 ```js
 import fs from 'node:fs';
-import { verify, createAnthropicJudge, formatTable } from 'spec-verify';
+import { verify, createAnthropicJudge, formatTable } from '@martello-systems/spec-verify';
 
 const { results, summary } = await verify({
   spec: fs.readFileSync('SPEC.md', 'utf8'),
@@ -196,9 +200,9 @@ if any criterion could not be verified.
   common ESM/CJS and Express/Fastify forms via regex (comment-stripped for
   routes), not a full parser. An exotic re-export or a route built from a
   computed string can be missed. Prefer a `grep` directive for anything unusual.
-- **Next.js file-convention routes are not matched by `route-exists`** (the path
-  is in the file name, not in code). Use `file-exists` with a glob like
-  `app/**/route.{js,ts}` instead.
+- **Next.js file-convention routes are matched against the file tree**, but
+  deeply-dynamic catch-all mapping is best-effort: a literal request segment is
+  allowed to match a `[param]`/`[...catchall]` directory at that position.
 - **The LLM judge is a fallback, not the moat.** Deterministic directives decide
   the verdict whenever they can; the judge only adjudicates criteria with no
   directive. Lean on directives for anything you want CI to enforce hard.
