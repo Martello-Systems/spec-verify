@@ -19,6 +19,11 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const COMPLETE = path.join(here, 'fixtures', 'build-complete');
 const INCOMPLETE = path.join(here, 'fixtures', 'build-incomplete');
+const API_GOOD = path.join(here, 'fixtures', 'build-api-good');
+const ROUTE_EXPRESS = path.join(here, 'fixtures', 'route-cases', 'express-route');
+const ROUTE_FASTIFY = path.join(here, 'fixtures', 'route-cases', 'fastify-route');
+const ROUTE_STRING_ONLY = path.join(here, 'fixtures', 'route-cases', 'string-only');
+const GREP_CASES = path.join(here, 'fixtures', 'grep-cases');
 
 /* ----- glob ----- */
 
@@ -94,6 +99,36 @@ test('checkGrep: invalid regex is non-determinate', async () => {
   assert.equal(e.determinate, false);
 });
 
+/* ----- grep `min` counts OCCURRENCES, not files (regression) ----- */
+
+// Before the fix, `min` counted the number of *files* containing a match, so a
+// single file with two occurrences (one file) failed `min:2` and two files with
+// one occurrence each passed it. `min` must count total occurrences.
+
+test('checkGrep: min counts occurrences — two hits in ONE file satisfy min=2', async () => {
+  // OLD behavior: hits.length === 1 file < 2 -> FAIL. NEW: 2 occurrences -> PASS.
+  const e = await checkGrep(GREP_CASES, { pattern: 'foo', min: 2, glob: 'double.js' });
+  assert.equal(e.verdict, 'PASS', 'two occurrences in one file should satisfy min=2');
+  assert.equal(e.details.occurrences, 2);
+  assert.equal(e.details.hitCount, 1, 'still just one file');
+});
+
+test('checkGrep: min counts occurrences — a single occurrence fails min=2', async () => {
+  const e = await checkGrep(GREP_CASES, { pattern: 'foo', min: 2, glob: 'single.js' });
+  assert.equal(e.verdict, 'FAIL', 'one occurrence must not satisfy min=2');
+  assert.equal(e.details.occurrences, 1);
+});
+
+test('checkGrep: existing "at least twice" fixture passes for the right reason', async () => {
+  // The api-spec uses grep pattern="discount" min="2". In a single schema file
+  // "discount" appears multiple times; occurrence-counting must see >= 2 even
+  // though it is only ONE file (which file-counting would have failed).
+  const e = await checkGrep(API_GOOD, { pattern: 'discount', flags: 'i', min: 2, glob: 'schema.js' });
+  assert.equal(e.verdict, 'PASS');
+  assert.equal(e.details.hitCount, 1, 'all matches are in a single file');
+  assert.ok(e.details.occurrences >= 2, `expected >= 2 occurrences, got ${e.details.occurrences}`);
+});
+
 /* ----- export-exists ----- */
 
 test('checkExportExists: finds an exported function', async () => {
@@ -116,6 +151,41 @@ test('checkRouteExists: PASS when route present (complete build)', async () => {
 test('checkRouteExists: FAIL when route absent (incomplete build)', async () => {
   const e = await checkRouteExists(INCOMPLETE, { path: '/health' });
   assert.equal(e.verdict, 'FAIL');
+});
+
+/* ----- route-exists must require a real routing construct (regression) ----- */
+
+// Before the fix, route-exists matched ANY quoted string equal to the path, so
+// a path appearing only in a comment, a log line, or a doc constant produced a
+// false PASS. The cardinal sin for a "don't trust the agent's word" tool.
+
+test('checkRouteExists: a path only in a comment/string is FAIL (no false green)', async () => {
+  // OLD behavior: the bare quoted literal '/widgets' matched -> false PASS.
+  // NEW behavior: no routing construct present -> FAIL.
+  const e = await checkRouteExists(ROUTE_STRING_ONLY, { path: '/widgets' });
+  assert.equal(e.verdict, 'FAIL', 'a quoted string in a comment/log is not a route');
+});
+
+test('checkRouteExists: a real Express route still PASSes', async () => {
+  const e = await checkRouteExists(ROUTE_EXPRESS, { path: '/widgets' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+test('checkRouteExists: a real Express route with an explicit method PASSes', async () => {
+  const e = await checkRouteExists(ROUTE_EXPRESS, { path: '/widgets', method: 'get' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+test('checkRouteExists: a Fastify-style url: config object PASSes', async () => {
+  const e = await checkRouteExists(ROUTE_FASTIFY, { path: '/widgets' });
+  assert.equal(e.verdict, 'PASS');
+});
+
+test('checkRouteExists: raw http req.url comparison PASSes (complete build)', async () => {
+  // build-complete declares its route as `req.url === '/health'`, not a router
+  // method call. That is still a genuine routing construct and must PASS.
+  const e = await checkRouteExists(COMPLETE, { path: '/health' });
+  assert.equal(e.verdict, 'PASS');
 });
 
 /* ----- npm-script detection (no execution) ----- */

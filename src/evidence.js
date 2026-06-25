@@ -144,9 +144,12 @@ export async function checkGrep(srcDir, args, ctx = {}) {
   if (!args.pattern) {
     return ev('grep', false, null, 'no pattern provided', {});
   }
+  const flags = args.flags || '';
   let re;
   try {
-    re = new RegExp(args.pattern, args.flags || '');
+    // Force the global flag so String#match returns *every* occurrence, not
+    // just the first. `min` counts total occurrences, so we must see them all.
+    re = new RegExp(args.pattern, flags.includes('g') ? flags : flags + 'g');
   } catch (e) {
     return ev('grep', false, null, `invalid regex: ${e.message}`, { pattern: args.pattern });
   }
@@ -156,6 +159,7 @@ export async function checkGrep(srcDir, args, ctx = {}) {
   const candidates = matchGlob(files, glob);
 
   const hits = [];
+  let occurrences = 0;
   for (const rel of candidates) {
     let content;
     try {
@@ -165,21 +169,33 @@ export async function checkGrep(srcDir, args, ctx = {}) {
     }
     // Skip obvious binaries.
     if (content.includes('\0')) continue;
-    if (re.test(content)) {
+    // Count occurrences in this file. With the global flag, String#match
+    // returns an array of all matches (or null); its length is the count.
+    const matches = content.match(re);
+    if (matches && matches.length) {
+      occurrences += matches.length;
       hits.push(rel);
-      // Reset lastIndex for global regexes so .test() stays correct next file.
-      re.lastIndex = 0;
     }
   }
-  const ok = hits.length >= min;
+  // `min` is a threshold on total occurrences across the matched files, not on
+  // the number of files that happen to contain a match. A single file with two
+  // hits satisfies min=2; two files with one hit each do too.
+  const ok = occurrences >= min;
   return ev(
     'grep',
     true,
     ok ? 'PASS' : 'FAIL',
     ok
-      ? `pattern matched in ${hits.length} file(s)`
-      : `pattern matched in ${hits.length} file(s), need >= ${min}`,
-    { pattern: args.pattern, glob, min, hits: hits.slice(0, 25), hitCount: hits.length },
+      ? `pattern matched ${occurrences} time(s) across ${hits.length} file(s)`
+      : `pattern matched ${occurrences} time(s) across ${hits.length} file(s), need >= ${min}`,
+    {
+      pattern: args.pattern,
+      glob,
+      min,
+      hits: hits.slice(0, 25),
+      hitCount: hits.length,
+      occurrences,
+    },
   );
 }
 
@@ -271,7 +287,12 @@ export async function checkExportExists(srcDir, args, ctx = {}) {
 /**
  * route-exists: does any file declare a route at the given path?
  * args: { path: string, method?: string, glob?: string }
- * Matches Express/Fastify/Next-style declarations and route-string literals.
+ *
+ * Matches Express/Fastify/Koa-style declarations and config-driven route
+ * objects. Crucially it requires the path to co-occur with an actual *routing
+ * construct* — a method call, a route-config key, or a request-URL comparison.
+ * A path that merely appears as a quoted string in a comment, a log line, or a
+ * test constant is NOT a route and must not produce a (false) PASS.
  */
 export async function checkRouteExists(srcDir, args, ctx = {}) {
   const routePath = args.path;
@@ -279,14 +300,20 @@ export async function checkRouteExists(srcDir, args, ctx = {}) {
     return ev('route-exists', false, null, 'no path provided', {});
   }
   const p = escapeRe(routePath);
-  const method = args.method ? escapeRe(args.method.toLowerCase()) : '(get|post|put|patch|delete|all|use)';
+  const method = args.method
+    ? escapeRe(args.method.toLowerCase())
+    : '(?:get|post|put|patch|delete|options|head|all|use)';
+  // The path rendered as a quoted string literal (single, double, or template).
+  const q = `['"\`]${p}['"\`]`;
   const patterns = [
-    // app.get('/path', ...) / router.post("/path", ...)
-    `\\.\\s*${method}\\s*\\(\\s*['"\`]${p}['"\`]`,
-    // { method: 'GET', url: '/path' } (fastify object form)
-    `url\\s*:\\s*['"\`]${p}['"\`]`,
-    // bare route string literal (covers config-driven routers / Next files)
-    `['"\`]${p}['"\`]`,
+    // 1. Router method call: app.get('/path', ...) / router.post("/path", ...)
+    `\\.\\s*${method}\\s*\\(\\s*${q}`,
+    // 2. Route-config object key: { method:'GET', url:'/path' } / { path:'/path' }
+    //    / { route:'/path' } (Fastify object form, config-driven routers).
+    `(?:url|path|route|pathname)\\s*:\\s*${q}`,
+    // 3. Raw http(s) request dispatch: req.url === '/path' (or the reverse).
+    `(?:req(?:uest)?\\.url|\\.pathname)\\s*===?\\s*${q}`,
+    `${q}\\s*===?\\s*(?:req(?:uest)?\\.url|\\.pathname)`,
   ];
   const combined = patterns.join('|');
   const globs = expandBraces(args.glob || '**/*.{js,jsx,ts,tsx,mjs,cjs}');
