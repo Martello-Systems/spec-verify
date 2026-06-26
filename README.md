@@ -27,9 +27,9 @@ from the artifacts on disk. A criterion only PASSes when the evidence shows it.
 ```bash
 npm install
 # or globally (the CLI command stays `spec-verify`):
-npm i -g @martello-systems/spec-verify
+npm i -g github:Martello-Systems/spec-verify
 # or as a dependency:
-npm install @martello-systems/spec-verify
+npm install spec-verify
 ```
 
 Requires Node 18+.
@@ -169,7 +169,7 @@ With `--json`:
 
 ```js
 import fs from 'node:fs';
-import { verify, createAnthropicJudge, formatTable } from '@martello-systems/spec-verify';
+import { verify, createAnthropicJudge, formatTable } from 'spec-verify';
 
 const { results, summary } = await verify({
   spec: fs.readFileSync('SPEC.md', 'utf8'),
